@@ -461,21 +461,30 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- PROXY FETCH (CLEANED) ---
+    // --- FETCH LOGIC FIXED FOR NETLIFY/GITHUB ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
-        // Base API URL (Clean)
-        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
+        // 1. Build the Target URL with Timestamp INSIDE to prevent 400s
+        const ts = Date.now();
+        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
         
-        // Proxy strategies with simple URL encoding, avoiding complex params that might trigger 400
         const strategies = [
-            // 1. CorsProxy.io (Fastest) - Clean target, no timestamp on target
-            { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, type: 'direct' },
-            // 2. AllOrigins (Backup)
-            { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, type: 'json-wrap' },
-            // 3. Direct (For local testing with extension)
-            { url: targetUrl, type: 'direct' }
+            // A. CodeTabs (Most Permissive)
+            { 
+                url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, 
+                type: 'direct' 
+            },
+            // B. CorsProxy.io (Backup)
+            { 
+                url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, 
+                type: 'direct' 
+            },
+            // C. AllOrigins (JSONP Wrapper)
+            { 
+                url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, 
+                type: 'json-wrap' 
+            }
         ];
 
         let success = false;
@@ -483,10 +492,7 @@
         for (const strat of strategies) {
             if (success) break;
             try {
-                // Add random param to proxy url to prevent caching
-                const fetchUrl = `${strat.url}${strat.url.includes('?') ? '&' : '?'}random=${Date.now()}`;
-                
-                const res = await fetch(fetchUrl);
+                const res = await fetch(strat.url);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
                 let data;
@@ -503,7 +509,7 @@
                     success = true;
                 }
             } catch (e) {
-                // Fail silently
+                // console.warn(`Proxy failed: ${strat.url}`, e);
             }
         }
 
