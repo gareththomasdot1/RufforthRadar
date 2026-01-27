@@ -461,33 +461,34 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- PROXY FETCH (CLEANED - NO RANDOM PARAM) ---
+    // --- FETCH LOGIC (FIXED: TimeStamp INSIDE Encoding) ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
-        // Base API URL (No timestamps added here to avoid 400 errors)
-        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
+        const ts = Date.now();
+        // Construct the TARGET URL first, including the cache buster
+        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
         
-        // Use Fetch API options to bust cache instead of URL params
-        const fetchOpts = { cache: 'no-store' };
+        // NOW encode the whole thing
+        const encodedTarget = encodeURIComponent(targetUrl);
 
         const strategies = [
-            // 1. CodeTabs (Friendly to GitHub Pages)
-            { 
-                name: 'CodeTabs',
-                url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, 
-                type: 'direct' 
-            },
-            // 2. CorsProxy.io (Backup)
+            // 1. CorsProxy.io (Fastest) - Clean URL
             { 
                 name: 'CorsProxy',
-                url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, 
+                url: `https://corsproxy.io/?${encodedTarget}`, 
                 type: 'direct' 
             },
-            // 3. AllOrigins (JSON Wrapper)
+            // 2. CodeTabs (Friendly)
+            { 
+                name: 'CodeTabs',
+                url: `https://api.codetabs.com/v1/proxy?quest=${encodedTarget}`, 
+                type: 'direct' 
+            },
+            // 3. AllOrigins (Backup)
             { 
                 name: 'AllOrigins',
-                url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, 
+                url: `https://api.allorigins.win/get?url=${encodedTarget}`, 
                 type: 'json-wrap' 
             }
         ];
@@ -497,7 +498,8 @@
         for (const strat of strategies) {
             if (success) break;
             try {
-                const res = await fetch(strat.url, fetchOpts);
+                // Request NO cache from the proxy itself
+                const res = await fetch(strat.url, { cache: 'no-store' });
                 
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
@@ -531,7 +533,7 @@
     }
 
     function processTrafficData(data, source) {
-        // console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
+        console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
