@@ -476,66 +476,37 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    async function updateTraffic() {
+   async function updateTraffic() {
         refreshCountdown = refreshMax; 
-        
         const ts = Date.now();
-        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
         
-        const strategies = [
-            { 
-                name: 'CodeTabs',
-                url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, 
-                type: 'direct' 
-            },
-            { 
-                name: 'CorsProxy',
-                url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, 
-                type: 'direct' 
-            },
-            { 
-                name: 'AllOrigins',
-                url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, 
-                type: 'json-wrap' 
-            }
-        ];
+        // This relies on the netlify.toml file working!
+        const url = `/api/adsb/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
 
-        let success = false;
+        try {
+            const res = await fetch(url);
+            
+            if (res.status === 404) throw new Error("Redirects not active - Check netlify.toml");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            
+            const data = await res.json();
+            
+            console.log(`DATA OK:`, data.ac ? data.ac.length : 0, "aircraft");
+            const lbl = document.getElementById('status-lbl');
+            lbl.innerText = "REFRESHING IN:";
+            lbl.classList.remove('error');
+            lbl.classList.add('flash');
+            setTimeout(() => lbl.classList.remove('flash'), 1000);
 
-        for (const strat of strategies) {
-            if (success) break;
-            try {
-                const res = await fetch(strat.url, { cache: 'no-store' });
-                
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                
-                let data;
-                if (strat.type === 'json-wrap') {
-                    const wrapper = await res.json();
-                    if (!wrapper.contents) throw new Error("Empty Proxy Wrapper");
-                    data = JSON.parse(wrapper.contents);
-                } else {
-                    data = await res.json();
-                }
-
-                if (data && (data.ac || Array.isArray(data.ac))) {
-                    processTrafficData(data, strat.name);
-                    success = true;
-                }
-            } catch (e) {}
-        }
-
-        if (!success) {
+            latestTrafficData = data.ac || []; 
+            renderUI();
+        } catch (e) {
+            console.error("Fetch Failed:", e);
             const lbl = document.getElementById('status-lbl');
             lbl.innerText = "LINK DOWN";
             lbl.classList.add('error');
-        } else {
-             const lbl = document.getElementById('status-lbl');
-             lbl.innerText = "REFRESHING IN:";
-             lbl.classList.remove('error');
         }
     }
-
     function processTrafficData(data, source) {
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
