@@ -151,12 +151,11 @@
             font-family: monospace; font-size: 10px; color: var(--airbus-green); 
             background: rgba(0,0,0,0.8); padding: 1px 3px; border-radius: 2px;
             white-space: nowrap; 
-            transform: translate(-50%, -42px); /* Shifted higher */
+            transform: translate(-50%, -42px); 
             border: 1px solid #444;
             z-index: 100;
         }
         
-        /* State Colors (Applied to Stroke) */
         .status-emergency path, .status-emergency line, .status-emergency circle { 
             stroke: var(--airbus-red); animation: blink 0.5s infinite; 
         }
@@ -462,59 +461,64 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- MULTI-PROXY FALLBACK SYSTEM ---
+    // --- PROXY FETCH (CLEANED) ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
-        const timestamp = Date.now();
         // Base API URL (Clean)
         const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
         
-        const proxies = [
-            // 1. Direct (Ideal)
-            { url: `${targetUrl}?_=${timestamp}`, type: 'direct' },
-            // 2. AllOrigins (Best Wrapper) - Append timestamp to proxy url
-            { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${timestamp}`, type: 'json-wrap' },
-            // 3. CorsProxy.io (Fallback) - Append timestamp to proxy url
-            { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_=${timestamp}`, type: 'direct' }
+        // Proxy strategies with simple URL encoding, avoiding complex params that might trigger 400
+        const strategies = [
+            // 1. CorsProxy.io (Fastest) - Clean target, no timestamp on target
+            { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, type: 'direct' },
+            // 2. AllOrigins (Backup)
+            { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, type: 'json-wrap' },
+            // 3. Direct (For local testing with extension)
+            { url: targetUrl, type: 'direct' }
         ];
 
         let success = false;
 
-        for (const proxy of proxies) {
+        for (const strat of strategies) {
             if (success) break;
             try {
-                const res = await fetch(proxy.url);
+                // Add random param to proxy url to prevent caching
+                const fetchUrl = `${strat.url}${strat.url.includes('?') ? '&' : '?'}random=${Date.now()}`;
+                
+                const res = await fetch(fetchUrl);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
                 let data;
-                if (proxy.type === 'json-wrap') {
+                if (strat.type === 'json-wrap') {
                     const wrapper = await res.json();
-                    if (!wrapper.contents) throw new Error("Empty Wrapper");
+                    if (!wrapper.contents) throw new Error("Empty Proxy Wrapper");
                     data = JSON.parse(wrapper.contents);
                 } else {
                     data = await res.json();
                 }
 
-                if (data && data.ac) {
-                    processTrafficData(data, proxy.type);
+                if (data && (data.ac || Array.isArray(data.ac))) {
+                    processTrafficData(data, strat.url);
                     success = true;
                 }
             } catch (e) {
-                // Fail silently and try next
+                // Fail silently
             }
         }
 
         if (!success) {
-            console.error("All Fetch Attempts Failed");
             const lbl = document.getElementById('status-lbl');
+            lbl.innerText = "LINK DOWN";
             lbl.classList.add('error');
-            setTimeout(() => lbl.classList.remove('error'), 2000);
+        } else {
+             const lbl = document.getElementById('status-lbl');
+             lbl.innerText = "REFRESHING IN:";
+             lbl.classList.remove('error');
         }
     }
 
     function processTrafficData(data, source) {
-        console.log(`DATA OK (${source}):`, data.ac.length, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
