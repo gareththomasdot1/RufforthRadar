@@ -476,38 +476,81 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-   async function updateTraffic() {
+    // --- SMART TRAFFIC FETCH ---
+    async function updateTraffic() {
         refreshCountdown = refreshMax; 
         const ts = Date.now();
         
-        // This relies on the netlify.toml file working!
-        const url = `/api/adsb/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
-
+        // 1. Try Netlify Rewrite / Direct Fetch first
+        // If netlify.toml is present, this URL works perfectly without proxies
         try {
-            const res = await fetch(url);
+            const localUrl = `/api/adsb/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
+            const res = await fetch(localUrl);
             
-            if (res.status === 404) throw new Error("Redirects not active - Check netlify.toml");
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            
-            const data = await res.json();
-            
-            console.log(`DATA OK:`, data.ac ? data.ac.length : 0, "aircraft");
-            const lbl = document.getElementById('status-lbl');
-            lbl.innerText = "REFRESHING IN:";
-            lbl.classList.remove('error');
-            lbl.classList.add('flash');
-            setTimeout(() => lbl.classList.remove('flash'), 1000);
-
-            latestTrafficData = data.ac || []; 
-            renderUI();
+            // If it returns 200, we are good. If 404 or 400, the rewrite isn't working.
+            if (res.ok) {
+                const data = await res.json();
+                processTrafficData(data, "Netlify");
+                return; // Stop here, we got data!
+            }
         } catch (e) {
-            console.error("Fetch Failed:", e);
+            // Rewrite failed or running locally, proceed to proxies
+        }
+
+        // 2. Fallback: Robust Proxy Strategy
+        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
+        const encodedTarget = encodeURIComponent(targetUrl);
+        
+        const proxies = [
+            { 
+                url: `https://api.codetabs.com/v1/proxy?quest=${encodedTarget}`, 
+                type: 'direct', name: 'CodeTabs' 
+            },
+            { 
+                url: `https://corsproxy.io/?${encodedTarget}`, 
+                type: 'direct', name: 'CorsProxy' 
+            }
+        ];
+
+        let success = false;
+
+        for (const strat of proxies) {
+            if (success) break;
+            try {
+                const res = await fetch(strat.url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                
+                let data;
+                if (strat.type === 'json-wrap') {
+                    // Not using JSON wrapper currently, but kept logic just in case
+                    const wrapper = await res.json();
+                    data = JSON.parse(wrapper.contents);
+                } else {
+                    data = await res.json();
+                }
+
+                if (data && (data.ac || Array.isArray(data.ac))) {
+                    processTrafficData(data, strat.name);
+                    success = true;
+                }
+            } catch (e) {
+                // Try next proxy
+            }
+        }
+
+        if (!success) {
             const lbl = document.getElementById('status-lbl');
             lbl.innerText = "LINK DOWN";
             lbl.classList.add('error');
+        } else {
+             const lbl = document.getElementById('status-lbl');
+             lbl.innerText = "REFRESHING IN:";
+             lbl.classList.remove('error');
         }
     }
+
     function processTrafficData(data, source) {
+        console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
@@ -627,7 +670,6 @@
                 mapLocal.flyTo([ac.lat, ac.lon], 14);
                 mapWide.flyTo([ac.lat, ac.lon]);
                 
-                // We create a temporary invisible marker to open the popup immediately
                 L.popup({ offset: [0, -10] })
                     .setLatLng([ac.lat, ac.lon])
                     .setContent(popupContent)
