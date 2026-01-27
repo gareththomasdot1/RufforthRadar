@@ -461,27 +461,32 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- FETCH LOGIC FIXED FOR NETLIFY/GITHUB ---
+    // --- PROXY FETCH (CLEANED - NO RANDOM PARAM) ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
-        // 1. Build the Target URL with Timestamp INSIDE to prevent 400s
-        const ts = Date.now();
-        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
+        // Base API URL (No timestamps added here to avoid 400 errors)
+        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
         
+        // Use Fetch API options to bust cache instead of URL params
+        const fetchOpts = { cache: 'no-store' };
+
         const strategies = [
-            // A. CodeTabs (Most Permissive)
+            // 1. CodeTabs (Friendly to GitHub Pages)
             { 
+                name: 'CodeTabs',
                 url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, 
                 type: 'direct' 
             },
-            // B. CorsProxy.io (Backup)
+            // 2. CorsProxy.io (Backup)
             { 
+                name: 'CorsProxy',
                 url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, 
                 type: 'direct' 
             },
-            // C. AllOrigins (JSONP Wrapper)
+            // 3. AllOrigins (JSON Wrapper)
             { 
+                name: 'AllOrigins',
                 url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, 
                 type: 'json-wrap' 
             }
@@ -492,7 +497,8 @@
         for (const strat of strategies) {
             if (success) break;
             try {
-                const res = await fetch(strat.url);
+                const res = await fetch(strat.url, fetchOpts);
+                
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
                 let data;
@@ -505,11 +511,11 @@
                 }
 
                 if (data && (data.ac || Array.isArray(data.ac))) {
-                    processTrafficData(data, strat.url);
+                    processTrafficData(data, strat.name);
                     success = true;
                 }
             } catch (e) {
-                // console.warn(`Proxy failed: ${strat.url}`, e);
+                // console.warn(`${strat.name} failed:`, e);
             }
         }
 
@@ -525,6 +531,7 @@
     }
 
     function processTrafficData(data, source) {
+        // console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
