@@ -30,8 +30,10 @@
             display: flex; justify-content: space-between; align-items: center; padding: 0 15px;
         }
 
-        .controls-container { display: flex; gap: 15px; }
+        .controls-container { display: flex; gap: 15px; align-items: center; }
         .control-group { display: flex; background: #000; border: 1px solid #444; border-radius: 4px; padding: 2px; gap: 2px; }
+        
+        .lbl-refresh { font-size: 0.7rem; color: #888; font-weight: bold; margin-right: 5px; }
 
         .mode-btn {
             background: transparent; color: #666; border: none; padding: 4px 10px; 
@@ -114,7 +116,8 @@
         .status-panel { background: var(--panel-bg); border: 1px solid #444; overflow-y: auto; }
         table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.75rem; }
         th { color: var(--airbus-cyan); border-bottom: 1px solid #444; text-align: left; padding: 8px 4px; position: sticky; top: 0; background: #1a1f26; }
-        td { padding: 8px 4px; border-bottom: 1px solid #222; }
+        td { padding: 8px 4px; border-bottom: 1px solid #222; cursor: pointer; }
+        td:hover { background: rgba(255,255,255,0.1); }
 
         footer { 
             height: 70px; background: #000; border-top: 2px solid var(--airbus-cyan); 
@@ -164,6 +167,15 @@
         .status-normal path, .status-normal line, .status-normal circle { 
             stroke: var(--airbus-green); 
         }
+
+        /* Leaflet Popup Styling */
+        .leaflet-popup-content-wrapper { background: rgba(10, 10, 10, 0.95); color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 0; }
+        .leaflet-popup-tip { background: #333; }
+        .leaflet-popup-content { margin: 10px; font-family: monospace; font-size: 12px; line-height: 1.4; }
+        .pop-row { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 2px 0; }
+        .pop-lbl { color: #888; }
+        .pop-val { color: var(--airbus-cyan); font-weight: bold; text-align: right; }
+        .pop-header { color: var(--airbus-green); font-size: 14px; font-weight: bold; border-bottom: 1px solid var(--airbus-green); padding-bottom: 3px; margin-bottom: 5px; text-align: center; }
     </style>
 </head>
 <body>
@@ -205,11 +217,14 @@
                 <button id="btn-all" class="mode-btn active" onclick="setMode('ALL')">ALL</button>
             </div>
             
-            <div class="control-group group-rate">
-                <button id="btn-15s" class="mode-btn" onclick="setRate(15)">15s</button>
-                <button id="btn-30s" class="mode-btn" onclick="setRate(30)">30s</button>
-                <button id="btn-60s" class="mode-btn active" onclick="setRate(60)">60s</button>
-                <button id="btn-90s" class="mode-btn" onclick="setRate(90)">90s</button>
+            <div style="display:flex; align-items:center;">
+                <span class="lbl-refresh">REFRESH:</span>
+                <div class="control-group group-rate">
+                    <button id="btn-15s" class="mode-btn" onclick="setRate(15)">15s</button>
+                    <button id="btn-30s" class="mode-btn" onclick="setRate(30)">30s</button>
+                    <button id="btn-60s" class="mode-btn active" onclick="setRate(60)">60s</button>
+                    <button id="btn-90s" class="mode-btn" onclick="setRate(90)">90s</button>
+                </div>
             </div>
         </div>
 
@@ -461,34 +476,26 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- FETCH LOGIC (FIXED: TimeStamp INSIDE Encoding) ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
         const ts = Date.now();
-        // Construct the TARGET URL first, including the cache buster
         const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
         
-        // NOW encode the whole thing
-        const encodedTarget = encodeURIComponent(targetUrl);
-
         const strategies = [
-            // 1. CorsProxy.io (Fastest) - Clean URL
-            { 
-                name: 'CorsProxy',
-                url: `https://corsproxy.io/?${encodedTarget}`, 
-                type: 'direct' 
-            },
-            // 2. CodeTabs (Friendly)
             { 
                 name: 'CodeTabs',
-                url: `https://api.codetabs.com/v1/proxy?quest=${encodedTarget}`, 
+                url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, 
                 type: 'direct' 
             },
-            // 3. AllOrigins (Backup)
+            { 
+                name: 'CorsProxy',
+                url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`, 
+                type: 'direct' 
+            },
             { 
                 name: 'AllOrigins',
-                url: `https://api.allorigins.win/get?url=${encodedTarget}`, 
+                url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`, 
                 type: 'json-wrap' 
             }
         ];
@@ -498,7 +505,6 @@
         for (const strat of strategies) {
             if (success) break;
             try {
-                // Request NO cache from the proxy itself
                 const res = await fetch(strat.url, { cache: 'no-store' });
                 
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -516,9 +522,7 @@
                     processTrafficData(data, strat.name);
                     success = true;
                 }
-            } catch (e) {
-                // console.warn(`${strat.name} failed:`, e);
-            }
+            } catch (e) {}
         }
 
         if (!success) {
@@ -533,7 +537,6 @@
     }
 
     function processTrafficData(data, source) {
-        console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
@@ -541,6 +544,25 @@
 
         latestTrafficData = data.ac || []; 
         renderUI();
+    }
+
+    function buildPopupContent(ac) {
+        const rows = [
+            ['REG', ac.reg],
+            ['TYPE', ac.type || 'N/A'],
+            ['SQUAWK', ac.squawk || 'N/A'],
+            ['ALT', (ac.alt || 0) + ' FT'],
+            ['GND SPD', (ac.spd || 0) + ' MPH'],
+            ['VERT SPD', (ac.vrate || 0) + ' FPM'],
+            ['DIST', (ac.dist || 0).toFixed(1) + ' NM'],
+            ['CAT', ac.cat || 'N/A']
+        ];
+        
+        let html = `<div class="pop-header">${ac.reg}</div>`;
+        rows.forEach(row => {
+            html += `<div class="pop-row"><span class="pop-lbl">${row[0]}</span><span class="pop-val">${row[1]}</span></div>`;
+        });
+        return html;
     }
 
     function renderUI() {
@@ -616,15 +638,39 @@
             let rowColor = "var(--airbus-green)";
             if(statusClass === 'status-emergency') rowColor = "var(--airbus-red)";
 
-            tbody.innerHTML += `<tr style="color:${rowColor}">
+            // Add table row with click event
+            const tr = document.createElement('tr');
+            tr.style.color = rowColor;
+            tr.innerHTML = `
                 <td>${regDisp}</td>
                 <td>${ac.alt}${altA}</td>
                 <td>${ac.spd}${ac.st}</td>
                 <td class="mag">${ac.dist.toFixed(1)}${ac.dt}</td>
-            </tr>`;
+            `;
+            
+            // Build the detailed popup
+            const popupContent = buildPopupContent(ac);
 
-            L.marker([ac.lat, ac.lon], { icon: icon }).addTo(trafficLayerLocal);
-            L.marker([ac.lat, ac.lon], { icon: icon }).addTo(trafficLayerWide);
+            // Click row to pan and open popup
+            tr.addEventListener('click', () => {
+                mapLocal.flyTo([ac.lat, ac.lon], 14);
+                mapWide.flyTo([ac.lat, ac.lon]);
+                
+                // We create a temporary invisible marker to open the popup immediately
+                L.popup({ offset: [0, -10] })
+                    .setLatLng([ac.lat, ac.lon])
+                    .setContent(popupContent)
+                    .openOn(mapLocal);
+            });
+            tbody.appendChild(tr);
+
+            L.marker([ac.lat, ac.lon], { icon: icon })
+                .bindPopup(popupContent)
+                .addTo(trafficLayerLocal);
+                
+            L.marker([ac.lat, ac.lon], { icon: icon })
+                .bindPopup(popupContent)
+                .addTo(trafficLayerWide);
         });
     }
 
