@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rufforth East Glass Cockpit</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --airbus-cyan: #00f2ff;
+            --airbus-green: #00ff00;
+            --airbus-magenta: #ff00ff;
+            --airbus-amber: #ff9900;
+            --airbus-red: #ff3333;
+            --bg-dark: #0b0e14;
+            --panel-bg: rgba(26, 31, 38, 0.95);
+            --btn-active: #343d4a;
+            --sidebar-bg: #15191f;
+        }
+
+        body, html { 
+            margin: 0; padding: 0; background: var(--bg-dark); color: #e0e0e0; 
+            font-family: 'Segoe UI', sans-serif; height: 100vh; width: 100vw; overflow: hidden;
+        }
+
+        .dashboard { display: flex; flex-direction: column; height: 100vh; transition: margin-right 0.3s; }
+
+        header { 
+            height: 45px; background: #111; border-bottom: 2px solid #333; 
+            display: flex; justify-content: space-between; align-items: center; padding: 0 15px;
+        }
+
+        .controls-container { display: flex; gap: 15px; }
+        .control-group { display: flex; background: #000; border: 1px solid #444; border-radius: 4px; padding: 2px; gap: 2px; }
+
+        .mode-btn {
+            background: transparent; color: #666; border: none; padding: 4px 10px; 
+            font-size: 0.7rem; font-weight: bold; cursor: pointer; border-radius: 3px;
+            border: 1px solid transparent; min-width: 35px;
+        }
+        .mode-btn:hover { background: #222; }
+        .mode-btn.active { background: var(--btn-active); color: var(--airbus-cyan); border: 1px solid #444; }
+
+        .header-right { display: flex; align-items: center; gap: 15px; }
+
+        .time-box { font-family: monospace; display: flex; align-items: center; gap: 8px; }
+        .time-lbl { color: #555; font-size: 0.65rem; font-weight: bold; letter-spacing: 0.5px; transition: color 0.5s; }
+        .time-lbl.flash { color: var(--airbus-cyan); text-shadow: 0 0 5px var(--airbus-cyan); }
+        .time-lbl.error { color: var(--airbus-red); }
+        
+        #refresh-timer { color: #888; font-size: 0.8rem; min-width: 25px; text-align: right; }
+        #zulu-clock { color: var(--airbus-green); font-size: 1rem; }
+
+        #btn-config {
+            background: transparent; border: none; color: #666; cursor: pointer; font-size: 1.2rem;
+            transition: color 0.3s; padding: 0 5px;
+        }
+        #btn-config:hover { color: var(--airbus-cyan); }
+
+        /* Sidebar Styling */
+        .sidebar {
+            height: 100%; width: 0; position: fixed; z-index: 2000; top: 0; right: 0;
+            background-color: var(--sidebar-bg); 
+            overflow-x: hidden; 
+            overflow-y: auto; 
+            transition: 0.3s;
+            border-left: 1px solid #444; padding-top: 60px; box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+        }
+        .sidebar-content { padding: 20px; width: 300px; box-sizing: border-box; padding-bottom: 100px; }
+        .sidebar h2 { color: var(--airbus-cyan); font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .closebtn { position: absolute; top: 10px; right: 20px; font-size: 2rem; color: #888; text-decoration: none; }
+        .closebtn:hover { color: #fff; }
+
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; color: #aaa; font-size: 0.8rem; margin-bottom: 5px; }
+        textarea { width: 100%; height: 120px; background: #000; color: var(--airbus-green); border: 1px solid #444; padding: 10px; font-family: monospace; font-size: 0.8rem; resize: none; }
+        input[type="range"] { width: 100%; accent-color: var(--airbus-cyan); cursor: pointer; }
+        .range-val { float: right; color: var(--airbus-cyan); font-weight: bold; font-size: 0.9rem; }
+        
+        .btn-save { 
+            width: 100%; padding: 12px; background: var(--btn-active); color: var(--airbus-cyan); 
+            border: 1px solid var(--airbus-cyan); cursor: pointer; font-weight: bold; margin-top: 20px; 
+            transition: background 0.2s; font-size: 0.9rem;
+        }
+        .btn-save:hover { background: #445; }
+        .btn-save:active { transform: scale(0.98); }
+
+        .main-view { display: flex; flex: 1; gap: 5px; padding: 5px; overflow: hidden; }
+
+        .leaflet-tile-pane { transition: opacity 0.1s linear; }
+
+        @media (orientation: landscape) {
+            .radar-box.local { flex: 1.5; }
+            .radar-box.wide { flex: 1.1; }
+            .status-panel { flex: 0.8; max-width: 320px; }
+        }
+        @media (orientation: portrait) {
+            .main-view { flex-direction: column; }
+            .radar-box.wide { display: none; }
+            .status-panel { height: 40%; }
+            .controls-container { gap: 5px; } 
+            .mode-btn { padding: 4px 6px; }
+        }
+
+        .radar-box { background: black; border: 1px solid #444; position: relative; border-radius: 4px; }
+        #map-local, #map-wide { height: 100%; width: 100%; background: black !important; }
+
+        .label { 
+            position: absolute; top: 5px; left: 5px; z-index: 1000; 
+            background: rgba(0,0,0,0.8); color: var(--airbus-cyan); 
+            padding: 2px 5px; font-size: 0.6rem; border: 1px solid var(--airbus-cyan);
+        }
+
+        .status-panel { background: var(--panel-bg); border: 1px solid #444; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.75rem; }
+        th { color: var(--airbus-cyan); border-bottom: 1px solid #444; text-align: left; padding: 8px 4px; position: sticky; top: 0; background: #1a1f26; }
+        td { padding: 8px 4px; border-bottom: 1px solid #222; }
+
+        footer { 
+            height: 70px; background: #000; border-top: 2px solid var(--airbus-cyan); 
+            display: grid; grid-template-columns: repeat(8, 1fr); align-items: center; 
+        }
+
+        .met-item { 
+            text-align: center; border-right: 1px solid #222; height: 100%; 
+            display: flex; flex-direction: column; justify-content: center;
+        }
+        
+        .met-lbl { color: #888; font-size: 0.6rem; margin-bottom: -2px; }
+        .val { display: block; color: var(--airbus-green); font-size: 1.1rem; font-weight: bold; line-height: 1.1; transition: color 0.3s; }
+        .unit { font-size: 0.65rem; color: #666; text-transform: uppercase; margin-top: -2px; }
+
+        .val.warn-amber { color: var(--airbus-amber) !important; animation: pulse 2s infinite; }
+        .val.warn-red { color: var(--airbus-red) !important; animation: blink 1s infinite; }
+
+        @keyframes blink { 50% { opacity: 0.5; } }
+        @keyframes pulse { 50% { opacity: 0.7; } }
+
+        .rwy-label {
+            color: var(--airbus-cyan); font-family: monospace; font-size: 10px;
+            background: black; border: 1px solid var(--airbus-cyan);
+            display: flex; align-items: center; justify-content: center; border-radius: 2px;
+        }
+
+        /* SVG Icon Styling */
+        .icon-symbol {
+            width: 24px; height: 24px; display: block;
+            filter: drop-shadow(0px 0px 2px black);
+        }
+        .icon-reg-label {
+            font-family: monospace; font-size: 10px; color: var(--airbus-green); 
+            background: rgba(0,0,0,0.8); padding: 1px 3px; border-radius: 2px;
+            white-space: nowrap; 
+            transform: translate(-50%, -42px); /* Shifted higher */
+            border: 1px solid #444;
+            z-index: 100;
+        }
+        
+        /* State Colors (Applied to Stroke) */
+        .status-emergency path, .status-emergency line, .status-emergency circle { 
+            stroke: var(--airbus-red); animation: blink 0.5s infinite; 
+        }
+        .status-emergency + .icon-reg-label { color: var(--airbus-red); border-color: var(--airbus-red); }
+        
+        .status-normal path, .status-normal line, .status-normal circle { 
+            stroke: var(--airbus-green); 
+        }
+    </style>
+</head>
+<body>
+
+<div id="mySidebar" class="sidebar">
+    <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
+    <div class="sidebar-content">
+        <h2>SYSTEM CONFIG</h2>
+        
+        <div class="form-group">
+            <span class="form-label">WATCH LIST (Comma Separated)</span>
+            <textarea id="cfg-watchlist"></textarea>
+        </div>
+
+        <div class="form-group">
+            <span class="form-label">RADAR RANGE <span id="val-range" class="range-val">50 NM</span></span>
+            <input type="range" id="cfg-range" min="10" max="100" step="5" value="50" oninput="updateRangeVal(this.value)">
+        </div>
+
+        <div class="form-group">
+            <span class="form-label">MAX ALTITUDE FILTER <span id="val-alt" class="range-val">3000 FT</span></span>
+            <input type="range" id="cfg-alt" min="1000" max="20000" step="500" value="3000" oninput="updateAltVal(this.value)">
+        </div>
+
+        <div class="form-group">
+            <span class="form-label">MAP VISIBILITY <span id="val-vis" class="range-val">100%</span></span>
+            <input type="range" id="cfg-vis" min="20" max="100" step="10" value="100" oninput="updateVisVal(this.value)">
+        </div>
+
+        <button id="btn-save" class="btn-save" onclick="saveConfig()">SAVE & APPLY</button>
+    </div>
+</div>
+
+<div id="main" class="dashboard">
+    <header>
+        <div class="controls-container">
+            <div class="control-group group-source">
+                <button id="btn-ninja" class="mode-btn" onclick="setMode('NINJA')">NINJA</button>
+                <button id="btn-all" class="mode-btn active" onclick="setMode('ALL')">ALL</button>
+            </div>
+            
+            <div class="control-group group-rate">
+                <button id="btn-15s" class="mode-btn" onclick="setRate(15)">15s</button>
+                <button id="btn-30s" class="mode-btn" onclick="setRate(30)">30s</button>
+                <button id="btn-60s" class="mode-btn active" onclick="setRate(60)">60s</button>
+                <button id="btn-90s" class="mode-btn" onclick="setRate(90)">90s</button>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="time-box">
+                <span class="time-lbl" id="status-lbl">REFRESHING IN:</span>
+                <span id="refresh-timer">60s</span>
+                <span id="zulu-clock">00:00:00Z</span>
+            </div>
+            <button id="btn-config" onclick="openNav()">&#9881;</button>
+        </div>
+    </header>
+
+    <div class="main-view">
+        <div class="radar-box local"><div class="label">LOCAL CCT</div><div id="map-local"></div></div>
+        <div class="radar-box wide"><div class="label" id="label-range">50NM AREA | MAX 3000FT</div><div id="map-wide"></div></div>
+        <div class="status-panel">
+            <table>
+                <thead><tr><th>REG</th><th>ALT</th><th>MPH</th><th>DIST</th></tr></thead>
+                <tbody id="traffic-rows"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer>
+        <div class="met-item">
+            <div class="met-lbl">WIND</div>
+            <span id="wind-dir" class="val">--</span>
+            <span class="unit" id="cardinal">---</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">SPD/GST</div>
+            <span id="wind-spd" class="val">--</span>
+            <span class="unit">MPH</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">RWY</div>
+            <span id="rwy" class="val">--</span>
+            <span class="unit">SUGG.</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">X-WIND</div>
+            <span id="x-wind" class="val">--</span>
+            <span class="unit">MPH</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">VIS</div>
+            <span id="met-vis" class="val">--</span>
+            <span class="unit">Meters</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">TEMP</div>
+            <span id="met-temp" class="val">--</span>
+            <span class="unit">°C</span>
+        </div>
+        <div class="met-item">
+            <div class="met-lbl">DEWPT</div>
+            <span id="met-dp" class="val">--</span>
+            <span class="unit">°C</span>
+        </div>
+        <div class="met-item" style="border:none">
+            <div class="met-lbl">PALT</div>
+            <span id="met-palt" class="val">--</span>
+            <span class="unit">FT</span>
+        </div>
+    </footer>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const RUFF_EAST_REF = { lat: 53.9495, lon: -1.1790 };
+    const RUFF_ELEVATION_FT = 110; 
+    
+    // --- STICK FIGURE ICONS ---
+    const SVG_PLANE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="2" x2="12" y2="22" /><line x1="2" y1="10" x2="22" y2="10" /><line x1="8" y1="19" x2="16" y2="19" /></svg>';
+    const SVG_HELI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="6" x2="12" y2="22" /><line x1="6" y1="6" x2="18" y2="14" /><line x1="6" y1="14" x2="18" y2="6" /></svg>';
+    const SVG_GYRO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20" /><path d="M5 4 L19 10 M5 10 L19 4" /><line x1="8" y1="14" x2="16" y2="14" /><path d="M7 20 L17 20 M7 20 L7 23 M17 20 L17 23" /></svg>';
+    const SVG_DOT = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/></svg>';
+
+    // --- CONFIG GLOBAL ---
+    const DEFAULT_WATCH = ["G-IROI","G-YROL","G-CIXX","G-CIEW","G-CFAR","G-IBBJ","G-CGZE","G-CGNM","G-CGLY","G-CKLK","G-CITX","G-YPDN","G-YROK","G-CKLE","G-CEOX","G-CGSD","G-FLIS"];
+    let CONFIG = {
+        watchList: DEFAULT_WATCH,
+        range: 50,
+        maxAlt: 3000,
+        mapVis: 100
+    };
+
+    try {
+        const stored = localStorage.getItem('rufforth_config');
+        if (stored) {
+            CONFIG = JSON.parse(stored);
+            console.log("Loaded Config:", CONFIG);
+        }
+    } catch(e) { console.error("Storage Error:", e); }
+
+    const RWY_05_THR = [53.95033, -1.17839]; 
+    const RWY_23_THR = [53.95379, -1.17169]; 
+    const KT_TO_MPH = 1.15078;
+    const MILE_TO_M = 1609.34;
+    
+    let refreshMax = 60; 
+    let refreshCountdown = refreshMax;
+    let trafficInterval = null; 
+
+    let currentMode = 'ALL';
+    let markers = {};
+    let latestTrafficData = []; 
+    let flightHistory = JSON.parse(localStorage.getItem('rufforth_history')) || {};
+
+    const mapLocal = L.map('map-local', { zoomControl: false, attributionControl: false, dragging: false, touchZoom: false }).setView([53.9485, -1.1680], 14);
+    const mapWide = L.map('map-wide', { zoomControl: false, attributionControl: false }).setView([RUFF_EAST_REF.lat, RUFF_EAST_REF.lon], 9);
+    
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapLocal);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(mapWide);
+
+    const trafficLayerLocal = L.layerGroup().addTo(mapLocal);
+    const trafficLayerWide = L.layerGroup().addTo(mapWide);
+    const ringsLayerWide = L.layerGroup().addTo(mapWide);
+    const ringsLayerLocal = L.layerGroup().addTo(mapLocal);
+
+    applyMapVis(CONFIG.mapVis);
+    drawStaticElements();
+
+    function drawStaticElements() {
+        L.polyline([RWY_05_THR, RWY_23_THR], { color: '#555', weight: 10, opacity: 0.9 }).addTo(mapLocal);
+        L.marker(RWY_05_THR, { icon: L.divIcon({ className: 'rwy-label', html: '05', iconSize: [25, 15] }) }).addTo(mapLocal);
+        L.marker(RWY_23_THR, { icon: L.divIcon({ className: 'rwy-label', html: '23', iconSize: [25, 15] }) }).addTo(mapLocal);
+
+        const exactCircuit = [
+            RWY_23_THR, [53.95651, -1.16604], [53.95581, -1.16096], [53.95040, -1.15640],
+            [53.94758, -1.15750], [53.94093, -1.17146], [53.94110, -1.17689],
+            [53.94310, -1.17954], [53.94839, -1.18104], RWY_05_THR              
+        ];
+        L.polyline(exactCircuit, { color: '#aaaaaa', weight: 2, dashArray: '5, 10', opacity: 0.6, smoothFactor: 1 }).addTo(mapLocal);
+    }
+
+    function drawRings() {
+        ringsLayerWide.clearLayers();
+        ringsLayerLocal.clearLayers();
+        const rings = [1, 10, 20, 30, 40];
+        rings.forEach(r => {
+            L.circle([RUFF_EAST_REF.lat, RUFF_EAST_REF.lon], {
+                radius: r * MILE_TO_M,
+                color: '#666', weight: 1.5, fill: false, dashArray: null, interactive: false
+            }).addTo(ringsLayerWide);
+            if(r === 1) {
+                L.circle([RUFF_EAST_REF.lat, RUFF_EAST_REF.lon], {
+                    radius: r * MILE_TO_M,
+                    color: '#777', weight: 1.5, fill: false, dashArray: null, interactive: false
+                }).addTo(ringsLayerLocal);
+            }
+        });
+    }
+
+    function openNav() {
+        document.getElementById("mySidebar").style.width = "300px";
+        loadConfig(); 
+    }
+    
+    function closeNav() { document.getElementById("mySidebar").style.width = "0"; }
+    
+    function loadConfig() {
+        try {
+            const stored = localStorage.getItem('rufforth_config');
+            if (stored) CONFIG = JSON.parse(stored);
+        } catch(e) {}
+
+        document.getElementById("cfg-watchlist").value = CONFIG.watchList.join(", ");
+        document.getElementById("cfg-range").value = CONFIG.range;
+        document.getElementById("cfg-alt").value = CONFIG.maxAlt;
+        document.getElementById("cfg-vis").value = CONFIG.mapVis || 100;
+        
+        updateRangeVal(CONFIG.range);
+        updateAltVal(CONFIG.maxAlt);
+        updateVisVal(CONFIG.mapVis || 100);
+    }
+
+    function updateRangeVal(v) { document.getElementById("val-range").innerText = v + " NM"; }
+    function updateAltVal(v) { document.getElementById("val-alt").innerText = v + " FT"; }
+    function updateVisVal(v) { 
+        document.getElementById("val-vis").innerText = v + "%";
+        applyMapVis(v); 
+    }
+
+    function applyMapVis(val) {
+        const panes = document.querySelectorAll('.leaflet-tile-pane');
+        panes.forEach(pane => { pane.style.opacity = val / 100; });
+    }
+
+    function updateMapBounds() {
+        const center = L.latLng(RUFF_EAST_REF.lat, RUFF_EAST_REF.lon);
+        const radiusMeters = CONFIG.range * MILE_TO_M;
+        const bounds = center.toBounds(radiusMeters * 2); 
+        mapWide.fitBounds(bounds);
+    }
+
+    function saveConfig() {
+        const rawList = document.getElementById("cfg-watchlist").value;
+        const range = parseInt(document.getElementById("cfg-range").value);
+        const alt = parseInt(document.getElementById("cfg-alt").value);
+        const vis = parseInt(document.getElementById("cfg-vis").value);
+
+        const newWatchList = rawList.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
+
+        CONFIG = { watchList: newWatchList, range: range, maxAlt: alt, mapVis: vis };
+        try {
+            localStorage.setItem('rufforth_config', JSON.stringify(CONFIG));
+        } catch(e) { console.warn("Save failed (File Mode?)"); }
+        
+        document.getElementById("label-range").innerText = `${range}NM AREA | MAX ${alt}FT`;
+        
+        drawRings(); 
+        applyMapVis(vis);
+        updateMapBounds();
+
+        const btn = document.getElementById("btn-save");
+        btn.innerText = "SETTINGS SAVED!";
+        setTimeout(() => { 
+            btn.innerText = "SAVE & APPLY"; 
+            closeNav(); 
+        }, 800);
+
+        updateTraffic(); 
+    }
+
+    function setMode(mode) {
+        currentMode = mode;
+        document.getElementById('btn-ninja').classList.toggle('active', mode === 'NINJA');
+        document.getElementById('btn-all').classList.toggle('active', mode === 'ALL');
+        renderUI(); 
+    }
+
+    function setRate(seconds) {
+        refreshMax = seconds;
+        refreshCountdown = seconds;
+        document.querySelectorAll('.group-rate .mode-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`btn-${seconds}s`).classList.add('active');
+        clearInterval(trafficInterval);
+        trafficInterval = setInterval(updateTraffic, refreshMax * 1000);
+        updateTraffic(); 
+    }
+
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 3958.8;
+        const dLat = (lat2-lat1)*Math.PI/180;
+        const dLon = (lon2-lon1)*Math.PI/180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    // --- MULTI-PROXY FALLBACK SYSTEM ---
+    async function updateTraffic() {
+        refreshCountdown = refreshMax; 
+        
+        const timestamp = Date.now();
+        // Base API URL (Clean)
+        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
+        
+        const proxies = [
+            // 1. Direct (Ideal)
+            { url: `${targetUrl}?_=${timestamp}`, type: 'direct' },
+            // 2. AllOrigins (Best Wrapper) - Append timestamp to proxy url
+            { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${timestamp}`, type: 'json-wrap' },
+            // 3. CorsProxy.io (Fallback) - Append timestamp to proxy url
+            { url: `https://corsproxy.io/?${encodeURIComponent(targetUrl)}&_=${timestamp}`, type: 'direct' }
+        ];
+
+        let success = false;
+
+        for (const proxy of proxies) {
+            if (success) break;
+            try {
+                const res = await fetch(proxy.url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                
+                let data;
+                if (proxy.type === 'json-wrap') {
+                    const wrapper = await res.json();
+                    if (!wrapper.contents) throw new Error("Empty Wrapper");
+                    data = JSON.parse(wrapper.contents);
+                } else {
+                    data = await res.json();
+                }
+
+                if (data && data.ac) {
+                    processTrafficData(data, proxy.type);
+                    success = true;
+                }
+            } catch (e) {
+                // Fail silently and try next
+            }
+        }
+
+        if (!success) {
+            console.error("All Fetch Attempts Failed");
+            const lbl = document.getElementById('status-lbl');
+            lbl.classList.add('error');
+            setTimeout(() => lbl.classList.remove('error'), 2000);
+        }
+    }
+
+    function processTrafficData(data, source) {
+        console.log(`DATA OK (${source}):`, data.ac.length, "aircraft");
+        const lbl = document.getElementById('status-lbl');
+        lbl.classList.remove('error');
+        lbl.classList.add('flash');
+        setTimeout(() => lbl.classList.remove('flash'), 1000);
+
+        latestTrafficData = data.ac || []; 
+        renderUI();
+    }
+
+    function renderUI() {
+        const tbody = document.getElementById('traffic-rows');
+        tbody.innerHTML = "";
+        
+        trafficLayerLocal.clearLayers();
+        trafficLayerWide.clearLayers();
+
+        const filteredAircraft = latestTrafficData.filter(ac => {
+            const reg = ac.r || ac.hex || "UNK";
+            if (currentMode === 'NINJA') {
+                return CONFIG.watchList.includes(reg.toUpperCase());
+            } else {
+                return (ac.alt_baro === undefined || ac.alt_baro <= CONFIG.maxAlt);
+            }
+        });
+
+        const processed = filteredAircraft.map(ac => {
+            const reg = ac.r || ac.hex || "UNK";
+            const d = calculateDistance(RUFF_EAST_REF.lat, RUFF_EAST_REF.lon, ac.lat, ac.lon);
+            const prev = flightHistory[reg] || { d: d, s: ac.gs };
+            
+            const item = {
+                reg: reg.toUpperCase(), 
+                alt: ac.alt_baro || 0,
+                spd: Math.round((ac.gs || 0) * KT_TO_MPH),
+                dist: d, 
+                vrate: ac.baro_rate || 0,
+                dt: d < prev.d ? "←" : "→",
+                st: ac.gs > prev.s ? "▲" : (ac.gs < prev.s ? "▼" : "•"),
+                lat: ac.lat, 
+                lon: ac.lon,
+                cat: ac.category,
+                type: ac.t || "",
+                squawk: ac.squawk,
+                emergency: ac.emergency
+            };
+            flightHistory[reg] = { d: d, s: ac.gs };
+            return item;
+        }).sort((a, b) => a.dist - b.dist);
+
+        localStorage.setItem('rufforth_history', JSON.stringify(flightHistory));
+
+        processed.forEach(ac => {
+            const altA = ac.vrate > 100 ? "↑" : (ac.vrate < -100 ? "↓" : "→");
+            const regDisp = ac.reg.includes('G-') ? ac.reg.replace('G-','') : ac.reg;
+            
+            let svgHtml = SVG_DOT; 
+            let statusClass = 'status-normal';
+
+            if (CONFIG.watchList.includes(ac.reg)) {
+                svgHtml = SVG_GYRO;
+            } else if ((ac.cat && ac.cat.startsWith("A7")) || ac.type.includes("Helicopter")) {
+                svgHtml = SVG_HELI;
+            } else if (ac.cat && ac.cat.startsWith("A")) {
+                svgHtml = SVG_PLANE;
+            }
+
+            if (ac.squawk === '7700' || (ac.emergency && ac.emergency !== 'none')) {
+                statusClass = 'status-emergency';
+            }
+
+            const iconHtml = `<div class="ac-icon ${statusClass}">${svgHtml}</div><div class="icon-reg-label">${regDisp}</div>`;
+
+            const icon = L.divIcon({
+                className: 'custom-icon',
+                html: iconHtml,
+                iconSize: [24, 24], 
+                iconAnchor: [12, 12]
+            });
+
+            let rowColor = "var(--airbus-green)";
+            if(statusClass === 'status-emergency') rowColor = "var(--airbus-red)";
+
+            tbody.innerHTML += `<tr style="color:${rowColor}">
+                <td>${regDisp}</td>
+                <td>${ac.alt}${altA}</td>
+                <td>${ac.spd}${ac.st}</td>
+                <td class="mag">${ac.dist.toFixed(1)}${ac.dt}</td>
+            </tr>`;
+
+            L.marker([ac.lat, ac.lon], { icon: icon }).addTo(trafficLayerLocal);
+            L.marker([ac.lat, ac.lon], { icon: icon }).addTo(trafficLayerWide);
+        });
+    }
+
+    function applyWarning(elemId, level) {
+        const el = document.getElementById(elemId);
+        el.classList.remove('warn-amber', 'warn-red');
+        if (level === 2) el.classList.add('warn-red');
+        else if (level === 1) el.classList.add('warn-amber');
+    }
+
+    async function fetchWeather() {
+        try {
+            const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${RUFF_EAST_REF.lat}&longitude=${RUFF_EAST_REF.lon}&current=temperature_2m,dewpoint_2m,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility&wind_speed_unit=kn`);
+            const d = await res.json();
+            const w = d.current;
+            const spd = Math.round(w.wind_speed_10m * KT_TO_MPH);
+            const gst = Math.round(w.wind_gusts_10m * KT_TO_MPH);
+            
+            document.getElementById('wind-dir').innerText = `${w.wind_direction_10m}°`;
+            document.getElementById('wind-spd').innerText = `${spd}/${gst}`;
+            
+            let windWarn = 0;
+            if(spd > 40 || gst > 40) windWarn = 2;
+            else if(spd > 25 || gst > 25) windWarn = 1;
+            applyWarning('wind-spd', windWarn);
+
+            const rad = (w.wind_direction_10m - 50) * (Math.PI / 180);
+            const xWindVal = Math.abs(spd * Math.sin(rad));
+            document.getElementById('x-wind').innerText = xWindVal.toFixed(1);
+            let xWarn = 0;
+            if(xWindVal > 20) xWarn = 2;
+            else if(xWindVal > 15) xWarn = 1;
+            applyWarning('x-wind', xWarn);
+
+            const vis = w.visibility; 
+            document.getElementById('met-vis').innerText = vis;
+            let visWarn = 0;
+            if(vis < 5000) visWarn = 2; 
+            else if(vis < 10000) visWarn = 1; 
+            applyWarning('met-vis', visWarn);
+
+            document.getElementById('rwy').innerText = Math.abs(w.wind_direction_10m - 50) < 90 ? "05" : "23";
+            const cards = ['N','NE','E','SE','S','SW','W','NW'];
+            document.getElementById('cardinal').innerText = cards[Math.round(w.wind_direction_10m / 45) % 8];
+
+            const t = Math.round(w.temperature_2m);
+            const dp = Math.round(w.dewpoint_2m);
+            document.getElementById('met-temp').innerText = t;
+            document.getElementById('met-dp').innerText = dp;
+            
+            const spread = t - dp;
+            let fogWarn = 0;
+            if(spread < 2) fogWarn = 2;
+            else if(spread < 3) fogWarn = 1;
+            applyWarning('met-temp', fogWarn);
+            applyWarning('met-dp', fogWarn);
+
+            const palt = Math.round(RUFF_ELEVATION_FT + (1013.25 - w.pressure_msl) * 30);
+            document.getElementById('met-palt').innerText = palt;
+        } catch(e) {}
+    }
+
+    setInterval(() => { 
+        document.getElementById('zulu-clock').innerText = new Date().toISOString().substr(11, 8) + "Z";
+        if(refreshCountdown > 0) refreshCountdown--;
+        document.getElementById('refresh-timer').innerText = refreshCountdown + "s";
+    }, 1000);
+
+    // Initial Load Sequence
+    loadConfig();
+    updateMapBounds(); 
+    document.getElementById("label-range").innerText = `${CONFIG.range}NM AREA | MAX ${CONFIG.maxAlt}FT`;
+    drawRings();
+    
+    trafficInterval = setInterval(updateTraffic, 60000);
+    setInterval(fetchWeather, 300000);
+    updateTraffic(); fetchWeather();
+</script>
+</body>
+</html>
