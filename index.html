@@ -476,54 +476,61 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- SMART TRAFFIC FETCH ---
+    // --- CLEAN URL FETCH (No Timestamp = No 400 Bad Request) ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
-        const ts = Date.now();
         
-        // 1. Try Netlify Rewrite / Direct Fetch first
-        // If netlify.toml is present, this URL works perfectly without proxies
-        try {
-            const localUrl = `/api/adsb/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
-            const res = await fetch(localUrl);
-            
-            // If it returns 200, we are good. If 404 or 400, the rewrite isn't working.
-            if (res.ok) {
-                const data = await res.json();
-                processTrafficData(data, "Netlify");
-                return; // Stop here, we got data!
-            }
-        } catch (e) {
-            // Rewrite failed or running locally, proceed to proxies
-        }
+        // NO timestamp param in the target URL. 
+        // This stops the proxies from rejecting the "malformed" URL.
+        const cleanTargetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`;
+        
+        // We use fetch options to force a reload
+        const fetchOpts = { cache: 'no-store' };
 
-        // 2. Fallback: Robust Proxy Strategy
-        const targetUrl = `https://api.adsb.lol/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}?_=${ts}`;
-        const encodedTarget = encodeURIComponent(targetUrl);
-        
-        const proxies = [
+        // Strategies:
+        // 1. Netlify Rewrite (Local Path) - Best if configured
+        // 2. AllOrigins - Best backup proxy (Permissive)
+        // 3. CorsProxy - Backup (Strict)
+        const strategies = [
             { 
-                url: `https://api.codetabs.com/v1/proxy?quest=${encodedTarget}`, 
-                type: 'direct', name: 'CodeTabs' 
+                url: `/api/adsb/v2/lat/${RUFF_EAST_REF.lat}/lon/${RUFF_EAST_REF.lon}/dist/${CONFIG.range}`, 
+                type: 'direct', name: 'Netlify' 
             },
             { 
-                url: `https://corsproxy.io/?${encodedTarget}`, 
+                url: `https://api.allorigins.win/get?url=${encodeURIComponent(cleanTargetUrl)}`, 
+                type: 'json-wrap', name: 'AllOrigins' 
+            },
+            { 
+                url: `https://corsproxy.io/?${encodeURIComponent(cleanTargetUrl)}`, 
                 type: 'direct', name: 'CorsProxy' 
             }
         ];
 
         let success = false;
 
-        for (const strat of proxies) {
+        for (const strat of strategies) {
             if (success) break;
             try {
-                const res = await fetch(strat.url);
+                // Add random param to PROXY URL (not target) for AllOrigins to bust cache
+                let finalUrl = strat.url;
+                if (strat.name === 'AllOrigins') {
+                    finalUrl += `&random=${Date.now()}`;
+                }
+
+                const res = await fetch(finalUrl, fetchOpts);
+                
+                // If Netlify rewrite isn't set up, it returns HTML (404 page), so check content type
+                const contentType = res.headers.get("content-type");
+                if (strat.name === 'Netlify' && (!res.ok || (contentType && !contentType.includes("json")))) {
+                    continue; // Skip to proxy
+                }
+
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
                 let data;
                 if (strat.type === 'json-wrap') {
-                    // Not using JSON wrapper currently, but kept logic just in case
                     const wrapper = await res.json();
+                    if (!wrapper.contents) throw new Error("Empty Proxy Wrapper");
                     data = JSON.parse(wrapper.contents);
                 } else {
                     data = await res.json();
@@ -534,7 +541,7 @@
                     success = true;
                 }
             } catch (e) {
-                // Try next proxy
+                // console.warn(`${strat.name} failed`, e);
             }
         }
 
