@@ -53,11 +53,12 @@
         #refresh-timer { color: #888; font-size: 0.8rem; min-width: 25px; text-align: right; }
         #zulu-clock { color: var(--airbus-green); font-size: 1rem; }
 
-        #btn-config {
+        #btn-config, #btn-help {
             background: transparent; border: none; color: #666; cursor: pointer; font-size: 1.2rem;
             transition: color 0.3s; padding: 0 5px;
         }
-        #btn-config:hover { color: var(--airbus-cyan); }
+        #btn-config:hover, #btn-help:hover { color: var(--airbus-cyan); }
+        #btn-help { font-weight: bold; font-family: monospace; font-size: 1.1rem; }
 
         /* Sidebar Styling */
         .sidebar {
@@ -72,6 +73,17 @@
         .sidebar h2 { color: var(--airbus-cyan); font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
         .closebtn { position: absolute; top: 10px; right: 20px; font-size: 2rem; color: #888; text-decoration: none; }
         .closebtn:hover { color: #fff; }
+
+        /* Help Modal */
+        .modal { display: none; position: fixed; z-index: 3000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(2px); }
+        .modal-content { background-color: #15191f; margin: 10% auto; padding: 25px; border: 1px solid var(--airbus-cyan); width: 85%; max-width: 500px; border-radius: 6px; box-shadow: 0 0 20px rgba(0,242,255,0.2); }
+        .close-help { color: #888; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 20px; }
+        .close-help:hover { color: #fff; }
+        .modal h2 { margin-top: 0; color: var(--airbus-cyan); border-bottom: 1px solid #444; padding-bottom: 10px; }
+        .help-item { margin-bottom: 15px; display: flex; align-items: flex-start; gap: 15px; }
+        .help-icon { font-size: 1.5rem; min-width: 30px; text-align: center; color: var(--airbus-green); }
+        .help-text h4 { margin: 0 0 5px 0; color: #fff; }
+        .help-text p { margin: 0; font-size: 0.85rem; color: #aaa; line-height: 1.4; }
 
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; color: #aaa; font-size: 0.8rem; margin-bottom: 5px; }
@@ -136,6 +148,11 @@
         .val.warn-amber { color: var(--airbus-amber) !important; animation: pulse 2s infinite; }
         .val.warn-red { color: var(--airbus-red) !important; animation: blink 1s infinite; }
 
+        .copyright-bar {
+            background: #000; color: #333; font-size: 9px; text-align: center; 
+            padding: 2px 0; font-family: sans-serif; border-top: 1px solid #111;
+        }
+
         @keyframes blink { 50% { opacity: 0.5; } }
         @keyframes pulse { 50% { opacity: 0.7; } }
 
@@ -179,6 +196,45 @@
     </style>
 </head>
 <body>
+
+<div id="helpModal" class="modal">
+    <div class="modal-content">
+        <span class="close-help" onclick="closeHelp()">&times;</span>
+        <h2>SYSTEM GUIDE</h2>
+        
+        <div class="help-item">
+            <div class="help-icon">&#9881;</div>
+            <div class="help-text">
+                <h4>System Config</h4>
+                <p>Click the Cog icon to adjust Radar Range (10-100NM), Max Altitude Filters, Map Visibility, and manage your specific aircraft Watch List.</p>
+            </div>
+        </div>
+
+        <div class="help-item">
+            <div class="help-icon">&#9992;</div>
+            <div class="help-text">
+                <h4>Traffic Details</h4>
+                <p>Click any aircraft in the list or on the map to see extended details (Speed, Vertical Rate, Squawk, Type) and highlight its position on the wide map.</p>
+            </div>
+        </div>
+
+        <div class="help-item">
+            <div class="help-icon">&#127760;</div>
+            <div class="help-text">
+                <h4>Dual Map View</h4>
+                <p><strong>Left:</strong> Fixed view of Rufforth Circuit.<br><strong>Right:</strong> Wide area view that tracks selected aircraft.</p>
+            </div>
+        </div>
+
+        <div class="help-item">
+            <div class="help-icon">&#9729;</div>
+            <div class="help-text">
+                <h4>Weather Data</h4>
+                <p>The bottom bar displays live local weather (METAR) including Wind, Runway Suggestion, Crosswind Component, and Cloud Base/Pressure.</p>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div id="mySidebar" class="sidebar">
     <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
@@ -234,6 +290,7 @@
                 <span id="refresh-timer">60s</span>
                 <span id="zulu-clock">00:00:00Z</span>
             </div>
+            <button id="btn-help" onclick="openHelp()">?</button>
             <button id="btn-config" onclick="openNav()">&#9881;</button>
         </div>
     </header>
@@ -291,6 +348,8 @@
             <span class="unit">FT</span>
         </div>
     </footer>
+    
+    <div class="copyright-bar">&copy; Gareth Thomas</div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -384,8 +443,14 @@
         document.getElementById("mySidebar").style.width = "300px";
         loadConfig(); 
     }
-    
     function closeNav() { document.getElementById("mySidebar").style.width = "0"; }
+    function openHelp() { document.getElementById("helpModal").style.display = "block"; }
+    function closeHelp() { document.getElementById("helpModal").style.display = "none"; }
+    
+    // Close modal on outside click
+    window.onclick = function(event) {
+        if (event.target == document.getElementById("helpModal")) closeHelp();
+    }
     
     function loadConfig() {
         try {
@@ -557,7 +622,7 @@
     }
 
     function processTrafficData(data, source) {
-        console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
+        // console.log(`DATA OK via ${source}:`, data.ac ? data.ac.length : 0, "aircraft");
         const lbl = document.getElementById('status-lbl');
         lbl.classList.remove('error');
         lbl.classList.add('flash');
@@ -674,13 +739,13 @@
 
             // Click row to pan and open popup
             tr.addEventListener('click', () => {
-                mapLocal.flyTo([ac.lat, ac.lon], 14);
+                // mapLocal.flyTo([ac.lat, ac.lon], 14); // REMOVED - Do not move local map
                 mapWide.flyTo([ac.lat, ac.lon]);
                 
                 L.popup({ offset: [0, -10] })
                     .setLatLng([ac.lat, ac.lon])
                     .setContent(popupContent)
-                    .openOn(mapLocal);
+                    .openOn(mapWide); // Open on Wide map
             });
             tbody.appendChild(tr);
 
