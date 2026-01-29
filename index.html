@@ -86,7 +86,7 @@
             transition: 0.3s;
             border-left: 1px solid #444; padding-top: 60px; box-shadow: -5px 0 15px rgba(0,0,0,0.5);
         }
-        .sidebar-content { padding: 20px; width: 300px; box-sizing: border-box; padding-bottom: 100px; }
+        .sidebar-content { padding: 20px; width: 100%; box-sizing: border-box; padding-bottom: 100px; }
         .sidebar h2 { color: var(--airbus-cyan); font-size: 1.2rem; margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
         .closebtn { position: absolute; top: 10px; right: 20px; font-size: 2rem; color: #888; text-decoration: none; }
         .closebtn:hover { color: #fff; }
@@ -104,7 +104,7 @@
 
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; color: #aaa; font-size: 0.8rem; margin-bottom: 5px; }
-        textarea { width: 100%; height: 120px; background: #000; color: var(--airbus-green); border: 1px solid #444; padding: 10px; font-family: monospace; font-size: 0.8rem; resize: none; }
+        textarea { width: 100%; height: 120px; background: #000; color: var(--airbus-green); border: 1px solid #444; padding: 10px; font-family: monospace; font-size: 0.8rem; resize: none; box-sizing: border-box; }
         input[type="range"] { width: 100%; accent-color: var(--airbus-cyan); cursor: pointer; }
         
         .coord-input { width: 48%; background: #000; color: var(--airbus-green); border: 1px solid #444; padding: 5px; font-family: monospace; }
@@ -112,9 +112,10 @@
 
         .range-val { float: right; color: var(--airbus-cyan); font-weight: bold; font-size: 0.9rem; }
         
-        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
-        .checkbox-lbl { color: #aaa; font-size: 0.8rem; cursor: pointer; }
-        input[type="checkbox"] { width: auto; accent-color: var(--airbus-cyan); cursor: pointer; }
+        select { 
+            width: 100%; background: #000; color: var(--airbus-cyan); border: 1px solid #444; 
+            padding: 8px; font-family: monospace; font-size: 0.9rem; cursor: pointer; margin-top: 5px;
+        }
 
         .btn-save { 
             width: 100%; padding: 12px; background: var(--btn-active); color: var(--airbus-cyan); 
@@ -205,6 +206,12 @@
             stroke: var(--airbus-green); 
         }
 
+        /* WATCH LIST BLUE STYLING */
+        .status-watch path, .status-watch line, .status-watch circle { 
+            stroke: var(--airbus-cyan); 
+        }
+        .status-watch + .icon-reg-label { color: var(--airbus-cyan); border-color: var(--airbus-cyan); }
+
         /* Leaflet Popup Styling */
         .leaflet-popup-content-wrapper { background: rgba(10, 10, 10, 0.95); color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 0; }
         .leaflet-popup-tip { background: #333; }
@@ -278,10 +285,12 @@
         <div class="form-group">
             <span class="form-label">WATCH LIST (Comma Separated)</span>
             <textarea id="cfg-watchlist"></textarea>
-            <div class="checkbox-group">
-                <input type="checkbox" id="cfg-watch-gyro">
-                <label for="cfg-watch-gyro" class="checkbox-lbl">Treat all in Watch List as Gyros</label>
-            </div>
+            <span class="form-label" style="margin-top:10px;">DISPLAY WATCH LIST AS:</span>
+            <select id="cfg-watch-type">
+                <option value="GYRO">GYROCOPTERS</option>
+                <option value="HELI">HELICOPTERS</option>
+                <option value="FIXED">FIXED WING</option>
+            </select>
         </div>
 
         <div class="form-group">
@@ -420,7 +429,7 @@
         mapVis: 100,
         centerLat: null,
         centerLon: null,
-        watchIsGyro: true // Default to true as per request
+        watchType: 'GYRO' // Default 'GYRO', 'HELI', or 'FIXED'
     };
 
     try {
@@ -506,7 +515,7 @@
     }
 
     function openNav() {
-        document.getElementById("mySidebar").style.width = "300px";
+        document.getElementById("mySidebar").style.width = "350px";
         loadConfig(); 
     }
     function closeNav() { document.getElementById("mySidebar").style.width = "0"; }
@@ -529,7 +538,7 @@
         document.getElementById("cfg-vis").value = CONFIG.mapVis || 100;
         document.getElementById("cfg-lat").value = CONFIG.centerLat || "";
         document.getElementById("cfg-lon").value = CONFIG.centerLon || "";
-        document.getElementById("cfg-watch-gyro").checked = CONFIG.watchIsGyro;
+        document.getElementById("cfg-watch-type").value = CONFIG.watchType || 'GYRO';
         
         updateRangeVal(CONFIG.range);
         updateAltVal(CONFIG.maxAlt);
@@ -561,7 +570,7 @@
         const range = parseInt(document.getElementById("cfg-range").value);
         const alt = parseInt(document.getElementById("cfg-alt").value);
         const vis = parseInt(document.getElementById("cfg-vis").value);
-        const isGyro = document.getElementById("cfg-watch-gyro").checked;
+        const wType = document.getElementById("cfg-watch-type").value;
         
         let inLat = parseFloat(document.getElementById("cfg-lat").value);
         let inLon = parseFloat(document.getElementById("cfg-lon").value);
@@ -583,7 +592,7 @@
         CONFIG.range = range;
         CONFIG.maxAlt = alt;
         CONFIG.mapVis = vis;
-        CONFIG.watchIsGyro = isGyro;
+        CONFIG.watchType = wType;
 
         try {
             localStorage.setItem('rufforth_config', JSON.stringify(CONFIG));
@@ -780,22 +789,35 @@
             
             let svgHtml = SVG_DOT; 
             let statusClass = 'status-normal';
+            let rowColor = "var(--airbus-green)"; // Default green
             
             const typeCode = (ac.type || "").toUpperCase();
             
-            // --- INFERRED ICON LOGIC ---
-            if (CONFIG.watchList.includes(ac.reg) && CONFIG.watchIsGyro) {
-                svgHtml = SVG_GYRO;
-            } else if (GYRO_CODES.some(t => typeCode.includes(t))) {
-                svgHtml = SVG_GYRO;
-            } else if ((ac.cat === "A7") || HELI_CODES.some(t => typeCode.includes(t))) {
-                svgHtml = SVG_HELI;
-            } else {
-                svgHtml = SVG_PLANE;
+            // --- INFERRED ICON & WATCH LIST LOGIC ---
+            if (CONFIG.watchList.includes(ac.reg)) {
+                // WATCH LIST ITEM -> ALWAYS BLUE
+                rowColor = "var(--airbus-cyan)";
+                statusClass = 'status-watch';
+                
+                if (CONFIG.watchType === 'GYRO') svgHtml = SVG_GYRO;
+                else if (CONFIG.watchType === 'HELI') svgHtml = SVG_HELI;
+                else svgHtml = SVG_PLANE;
+            } 
+            else {
+                // STANDARD TRAFFIC -> GREEN (Inferred Type)
+                if (GYRO_CODES.some(t => typeCode.includes(t))) {
+                    svgHtml = SVG_GYRO;
+                } else if ((ac.cat === "A7") || HELI_CODES.some(t => typeCode.includes(t))) {
+                    svgHtml = SVG_HELI;
+                } else {
+                    svgHtml = SVG_PLANE;
+                }
             }
 
+            // EMERGENCY OVERRIDE
             if (ac.squawk === '7700' || (ac.emergency && ac.emergency !== 'none')) {
                 statusClass = 'status-emergency';
+                rowColor = "var(--airbus-red)";
             }
 
             const iconHtml = `<div class="ac-icon ${statusClass}">${svgHtml}</div><div class="icon-reg-label">${regDisp}</div>`;
@@ -806,9 +828,6 @@
                 iconSize: [24, 24], 
                 iconAnchor: [12, 12]
             });
-
-            let rowColor = "var(--airbus-green)";
-            if(statusClass === 'status-emergency') rowColor = "var(--airbus-red)";
 
             const tr = document.createElement('tr');
             tr.style.color = rowColor;
