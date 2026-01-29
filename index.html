@@ -641,42 +641,62 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- CLEAN URL FETCH ---
+    // --- CLEAN URL FETCH & PROXY ROTATION ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
+        
+        // Strategy: 
+        // 1. Vercel Rewrite (If vercel.json exists) - Best
+        // 2. CodeTabs - Best Public Proxy
+        // 3. CorsProxy - Backup
+        // 4. AllOrigins - Last Resort
         
         const cleanTargetUrl = `https://api.adsb.lol/v2/lat/${CURRENT_REF.lat}/lon/${CURRENT_REF.lon}/dist/${CONFIG.range}`;
         const fetchOpts = { cache: 'no-store' };
 
         const strategies = [
+            // Netlify/Vercel Rewrites:
             { 
                 url: `/api/adsb/v2/lat/${CURRENT_REF.lat}/lon/${CURRENT_REF.lon}/dist/${CONFIG.range}`, 
-                type: 'direct', name: 'Netlify' 
+                type: 'direct', name: 'Rewrite' 
             },
+            // Public Proxies:
             { 
-                url: `https://api.allorigins.win/get?url=${encodeURIComponent(cleanTargetUrl)}`, 
-                type: 'json-wrap', name: 'AllOrigins' 
+                url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(cleanTargetUrl)}`, 
+                type: 'direct', name: 'CodeTabs' 
             },
             { 
                 url: `https://corsproxy.io/?${encodeURIComponent(cleanTargetUrl)}`, 
                 type: 'direct', name: 'CorsProxy' 
+            },
+            { 
+                url: `https://api.allorigins.win/get?url=${encodeURIComponent(cleanTargetUrl)}`, 
+                type: 'json-wrap', name: 'AllOrigins' 
             }
         ];
 
         let success = false;
 
+        // Skip rewrite check if on github.io (known static host)
+        if (window.location.hostname.includes("github.io")) {
+            strategies.shift(); // Remove the relative path strategy
+        }
+
         for (const strat of strategies) {
             if (success) break;
             try {
                 let finalUrl = strat.url;
+                // Cache buster for AllOrigins
                 if (strat.name === 'AllOrigins') {
                     finalUrl += `&random=${Date.now()}`;
                 }
 
                 const res = await fetch(finalUrl, fetchOpts);
                 
+                // If rewrite isn't set up, it might return 200 OK but HTML content (the 404 page)
+                // So we check content-type
                 const contentType = res.headers.get("content-type");
-                if (strat.name === 'Netlify' && (!res.ok || (contentType && !contentType.includes("json")))) {
+                if (strat.name === 'Rewrite' && (!res.ok || (contentType && !contentType.includes("json")))) {
                     continue; 
                 }
 
