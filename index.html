@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Glass Cockpit Dashboard</title>
+    <title>Rufforth East Glass Cockpit</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
@@ -112,6 +112,10 @@
 
         .range-val { float: right; color: var(--airbus-cyan); font-weight: bold; font-size: 0.9rem; }
         
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+        .checkbox-lbl { color: #aaa; font-size: 0.8rem; cursor: pointer; }
+        input[type="checkbox"] { width: auto; accent-color: var(--airbus-cyan); cursor: pointer; }
+
         .btn-save { 
             width: 100%; padding: 12px; background: var(--btn-active); color: var(--airbus-cyan); 
             border: 1px solid var(--airbus-cyan); cursor: pointer; font-weight: bold; margin-top: 20px; 
@@ -274,6 +278,10 @@
         <div class="form-group">
             <span class="form-label">WATCH LIST (Comma Separated)</span>
             <textarea id="cfg-watchlist"></textarea>
+            <div class="checkbox-group">
+                <input type="checkbox" id="cfg-watch-gyro">
+                <label for="cfg-watch-gyro" class="checkbox-lbl">Treat all in Watch List as Gyros</label>
+            </div>
         </div>
 
         <div class="form-group">
@@ -384,8 +392,8 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    const DEFAULT_REF = { lat: 53.9495, lon: -1.1790 };
-    let CURRENT_REF = { ...DEFAULT_REF };
+    const RUFF_EAST_REF = { lat: 53.9495, lon: -1.1790 };
+    let CURRENT_REF = { ...RUFF_EAST_REF };
     const RUFF_ELEVATION_FT = 110; 
     
     // --- STICK FIGURE ICONS ---
@@ -393,6 +401,15 @@
     const SVG_HELI = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="6" x2="12" y2="22" /><line x1="6" y1="6" x2="18" y2="14" /><line x1="6" y1="14" x2="18" y2="6" /></svg>';
     const SVG_GYRO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20" /><path d="M5 4 L19 10 M5 10 L19 4" /><line x1="8" y1="14" x2="16" y2="14" /><path d="M7 20 L17 20 M7 20 L7 23 M17 20 L17 23" /></svg>';
     const SVG_DOT = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/></svg>';
+
+    // --- LOOKUP DICTIONARIES FOR AIRCRAFT TYPES ---
+    const HELI_CODES = [
+        'R22','R44','R66','B06','H500','AS35','EC20','EC30','EC35','EC45','AS50','AS55','B407','B429','B505',
+        'HU50','S76','AW13','AW09','CABR','G2CA', 'H47', 'UH1', 'A109', 'A139', 'A169', 'H125', 'H135', 'H145', 'AS350'
+    ];
+    const GYRO_CODES = [
+        'MT03','MTO3','CLON','CALI','G44','MAGN','ELA','AR1','M16','M24', 'CAVA', 'CDUS', 'MT', 'MTO'
+    ];
 
     // --- CONFIG GLOBAL ---
     const DEFAULT_WATCH = ["G-IROI","G-YROL","G-CIXX","G-CIEW","G-CFAR","G-IBBJ","G-CGZE","G-CGNM","G-CGLY","G-CKLK","G-CITX","G-YPDN","G-YROK","G-CKLE","G-CEOX","G-CGSD","G-FLIS"];
@@ -402,7 +419,8 @@
         maxAlt: 3000,
         mapVis: 100,
         centerLat: null,
-        centerLon: null
+        centerLon: null,
+        watchIsGyro: true // Default to true as per request
     };
 
     try {
@@ -447,7 +465,7 @@
 
     function drawStaticElements() {
         staticLayerLocal.clearLayers();
-        const isDefault = (Math.abs(CURRENT_REF.lat - DEFAULT_REF.lat) < 0.0001 && Math.abs(CURRENT_REF.lon - DEFAULT_REF.lon) < 0.0001);
+        const isDefault = (Math.abs(CURRENT_REF.lat - RUFF_EAST_REF.lat) < 0.0001 && Math.abs(CURRENT_REF.lon - RUFF_EAST_REF.lon) < 0.0001);
         
         if (isDefault) {
             document.getElementById("label-local").innerText = "RUFF EAST CCT";
@@ -511,6 +529,7 @@
         document.getElementById("cfg-vis").value = CONFIG.mapVis || 100;
         document.getElementById("cfg-lat").value = CONFIG.centerLat || "";
         document.getElementById("cfg-lon").value = CONFIG.centerLon || "";
+        document.getElementById("cfg-watch-gyro").checked = CONFIG.watchIsGyro;
         
         updateRangeVal(CONFIG.range);
         updateAltVal(CONFIG.maxAlt);
@@ -542,6 +561,7 @@
         const range = parseInt(document.getElementById("cfg-range").value);
         const alt = parseInt(document.getElementById("cfg-alt").value);
         const vis = parseInt(document.getElementById("cfg-vis").value);
+        const isGyro = document.getElementById("cfg-watch-gyro").checked;
         
         let inLat = parseFloat(document.getElementById("cfg-lat").value);
         let inLon = parseFloat(document.getElementById("cfg-lon").value);
@@ -556,13 +576,14 @@
         } else {
             CONFIG.centerLat = null;
             CONFIG.centerLon = null;
-            CURRENT_REF = { ...DEFAULT_REF };
+            CURRENT_REF = { ...RUFF_EAST_REF };
         }
 
         CONFIG.watchList = newWatchList;
         CONFIG.range = range;
         CONFIG.maxAlt = alt;
         CONFIG.mapVis = vis;
+        CONFIG.watchIsGyro = isGyro;
 
         try {
             localStorage.setItem('rufforth_config', JSON.stringify(CONFIG));
@@ -574,7 +595,7 @@
         drawRings(); 
         applyMapVis(vis);
         updateMapBounds();
-        fetchWeather(); // Fetch weather for new location immediately
+        fetchWeather(); 
 
         const btn = document.getElementById("btn-save");
         btn.innerText = "SETTINGS SAVED!";
@@ -611,7 +632,7 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // --- CLEAN URL FETCH (No Timestamp = No 400 Bad Request) ---
+    // --- CLEAN URL FETCH ---
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
@@ -759,12 +780,17 @@
             
             let svgHtml = SVG_DOT; 
             let statusClass = 'status-normal';
-
-            if (CONFIG.watchList.includes(ac.reg)) {
+            
+            const typeCode = (ac.type || "").toUpperCase();
+            
+            // --- INFERRED ICON LOGIC ---
+            if (CONFIG.watchList.includes(ac.reg) && CONFIG.watchIsGyro) {
                 svgHtml = SVG_GYRO;
-            } else if ((ac.cat && ac.cat.startsWith("A7")) || ac.type.includes("Helicopter")) {
+            } else if (GYRO_CODES.some(t => typeCode.includes(t))) {
+                svgHtml = SVG_GYRO;
+            } else if ((ac.cat === "A7") || HELI_CODES.some(t => typeCode.includes(t))) {
                 svgHtml = SVG_HELI;
-            } else if (ac.cat && ac.cat.startsWith("A")) {
+            } else {
                 svgHtml = SVG_PLANE;
             }
 
@@ -784,7 +810,6 @@
             let rowColor = "var(--airbus-green)";
             if(statusClass === 'status-emergency') rowColor = "var(--airbus-red)";
 
-            // Add table row with click event
             const tr = document.createElement('tr');
             tr.style.color = rowColor;
             tr.innerHTML = `
@@ -794,10 +819,8 @@
                 <td class="mag">${ac.dist.toFixed(1)}${ac.dt}</td>
             `;
             
-            // Build the detailed popup
             const popupContent = buildPopupContent(ac);
 
-            // Click row to pan and open popup on WIDE map
             tr.addEventListener('click', () => {
                 mapWide.flyTo([ac.lat, ac.lon]);
                 L.popup({ offset: [0, -10] })
@@ -807,15 +830,12 @@
             });
             tbody.appendChild(tr);
 
-            // Draw Heading Line if track exists
             if (ac.track !== undefined) {
-                // Simple calculation for a short line ahead
-                const length = 0.02; // approx length in degrees
+                const length = 0.02; 
                 const rads = (ac.track * Math.PI) / 180;
                 const endLat = ac.lat + length * Math.cos(rads);
                 const endLon = ac.lon + length * Math.sin(rads);
                 
-                // Add line to both maps
                 [trafficLayerLocal, trafficLayerWide].forEach(layer => {
                     L.polyline([[ac.lat, ac.lon], [endLat, endLon]], {
                         color: '#666', weight: 1, opacity: 0.8
@@ -823,7 +843,6 @@
                 });
             }
 
-            // Add Markers
             L.marker([ac.lat, ac.lon], { icon: icon })
                 .bindPopup(popupContent)
                 .addTo(trafficLayerLocal);
