@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Rufforth East Glass Cockpit</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root {
@@ -19,7 +18,6 @@
             --sidebar-bg: #15191f;
         }
 
-        /* 1. FIX: Use 100dvh for mobile browsers to account for address bars */
         body, html { 
             margin: 0; padding: 0; background: var(--bg-dark); color: #e0e0e0; 
             font-family: 'Segoe UI', sans-serif; 
@@ -47,7 +45,7 @@
         header { 
             height: 45px; background: #111; border-bottom: 2px solid #333; 
             display: flex; justify-content: space-between; align-items: center; padding: 0 15px;
-            flex-shrink: 0; /* Never shrink the header */
+            flex-shrink: 0;
         }
 
         .controls-container { display: flex; gap: 15px; align-items: center; }
@@ -128,11 +126,10 @@
         .btn-save:hover { background: #445; }
         .btn-save:active { transform: scale(0.98); }
 
-        /* 2. FIX: Main View Flex settings */
         .main-view { 
             display: flex; 
-            flex: 1 1 auto; /* Allow grow and shrink */
-            min-height: 0; /* Critical: allows flex item to shrink below content size */
+            flex: 1 1 auto; 
+            min-height: 0; 
             gap: 5px; 
             padding: 5px; 
             overflow: hidden; 
@@ -165,7 +162,7 @@
         footer { 
             height: 50px; background: #000; border-top: 2px solid var(--airbus-cyan); 
             display: grid; grid-template-columns: repeat(8, 1fr); align-items: center; 
-            flex-shrink: 0; /* 3. FIX: Ensure footer never shrinks */
+            flex-shrink: 0; 
         }
 
         .met-item { 
@@ -499,12 +496,18 @@
                 [53.94758, -1.15750], [53.94093, -1.17146], [53.94110, -1.17689],
                 [53.94310, -1.17954], [53.94839, -1.18104], RWY_05_THR              
             ];
-            L.polyline(exactCircuit, { color: '#aaaaaa', weight: 2, dashArray: '5, 10', opacity: 0.6, smoothFactor: 1 }).addTo(staticLayerLocal);
+            
+            var circuitPoly = L.polyline(exactCircuit, { color: '#aaaaaa', weight: 2, dashArray: '5, 10', opacity: 0.6, smoothFactor: 1 });
+            circuitPoly.addTo(staticLayerLocal);
+            
+            // FIX: Ensure the entire circuit pattern is always visible in the local map
+            mapLocal.fitBounds(circuitPoly.getBounds(), {padding: [20, 20], animate: false});
         } else {
             document.getElementById("label-local").innerText = "CUSTOM LOCAL";
             L.marker([CURRENT_REF.lat, CURRENT_REF.lon], { 
                 icon: L.divIcon({className: 'rwy-label', html:'+', iconSize:[20,20]})
             }).addTo(staticLayerLocal);
+            mapLocal.setView([CURRENT_REF.lat, CURRENT_REF.lon], 13);
         }
     }
 
@@ -574,7 +577,7 @@
         const radiusMeters = CONFIG.range * MILE_TO_M;
         const bounds = center.toBounds(radiusMeters * 2); 
         mapWide.fitBounds(bounds);
-        mapLocal.setView([CURRENT_REF.lat, CURRENT_REF.lon], 14);
+        // Removed mapLocal.setView() here to prevent fighting with drawStaticElements
     }
 
     function saveConfig() {
@@ -657,12 +660,6 @@
     async function updateTraffic() {
         refreshCountdown = refreshMax; 
         
-        // Strategy: 
-        // 1. Vercel Rewrite (If vercel.json exists) - Best
-        // 2. CodeTabs - Best Public Proxy
-        // 3. CorsProxy - Backup
-        // 4. AllOrigins - Last Resort
-        
         const cleanTargetUrl = `https://api.adsb.lol/v2/lat/${CURRENT_REF.lat}/lon/${CURRENT_REF.lon}/dist/${CONFIG.range}`;
         const fetchOpts = { cache: 'no-store' };
 
@@ -689,24 +686,20 @@
 
         let success = false;
 
-        // Skip rewrite check if on github.io (known static host)
         if (window.location.hostname.includes("github.io")) {
-            strategies.shift(); // Remove the relative path strategy
+            strategies.shift(); 
         }
 
         for (const strat of strategies) {
             if (success) break;
             try {
                 let finalUrl = strat.url;
-                // Cache buster for AllOrigins
                 if (strat.name === 'AllOrigins') {
                     finalUrl += `&random=${Date.now()}`;
                 }
 
                 const res = await fetch(finalUrl, fetchOpts);
                 
-                // If rewrite isn't set up, it might return 200 OK but HTML content (the 404 page)
-                // So we check content-type
                 const contentType = res.headers.get("content-type");
                 if (strat.name === 'Rewrite' && (!res.ok || (contentType && !contentType.includes("json")))) {
                     continue; 
